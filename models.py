@@ -30,6 +30,9 @@ class WorkerProfile(Base):
     trust_score = Column(Float, default=50.0)
     is_available = Column(Boolean, default=True)
     skills = Column(String, nullable=True)
+    is_verified_worker = Column(Boolean, default=False)
+    verification_doc = Column(String, nullable=True)
+    verification_status = Column(String, default="unverified")
 
     user = relationship("User", back_populates="worker_profile")
 

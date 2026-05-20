@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
+from groq import Groq
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 from database import engine, get_db, Base
 import models, schemas
@@ -15,6 +17,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="SevaHome API")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY")
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 # --- Helper Functions ---
 def hash_password(password: str):
@@ -288,3 +291,94 @@ def update_booking_status(booking_id: int, status: str, db: Session = Depends(ge
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.post("/worker/submit-verification")
+async def submit_verification(
+    user_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    try:
+        # Check worker profile exists
+        worker = db.query(models.WorkerProfile).filter(
+            models.WorkerProfile.user_id == user_id
+        ).first()
+        if not worker:
+            raise HTTPException(status_code=404, detail="Worker profile not found!")
+
+        # Save file
+        import shutil
+        import os
+        os.makedirs("verification_docs", exist_ok=True)
+        file_path = f"verification_docs/{user_id}_{file.filename}"
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Update worker verification status
+        worker.verification_doc = file_path
+        worker.verification_status = "pending"
+        db.commit()
+
+        return {"message": "Verification document submitted successfully!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/pending-verifications")
+def get_pending_verifications(db: Session = Depends(get_db)):
+    try:
+        workers = db.query(models.WorkerProfile).filter(
+            models.WorkerProfile.verification_status == "pending"
+        ).all()
+        return workers
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/admin/verify-worker/{worker_id}")
+def verify_worker(worker_id: int, approve: bool, db: Session = Depends(get_db)):
+    try:
+        worker = db.query(models.WorkerProfile).filter(
+            models.WorkerProfile.id == worker_id
+        ).first()
+        if not worker:
+            raise HTTPException(status_code=404, detail="Worker not found!")
+
+        if approve:
+            worker.verification_status = "verified"
+            worker.is_verified_worker = True
+            worker.trust_score = min(worker.trust_score + 20, 100)
+        else:
+            worker.verification_status = "rejected"
+            worker.is_verified_worker = False
+
+        db.commit()
+        return {"message": f"Worker {'verified' if approve else 'rejected'} successfully!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
+
+@app.post("/worker/generate-bio")
+def generate_bio(
+    name: str,
+    skills: str,
+    experience: int,
+    location: str,
+    db: Session = Depends(get_db)
+):
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": """You are a professional profile writer for a home services app in Nepal. 
+                Write a short, friendly, professional bio for a worker.
+                Write in simple English. Maximum 3 sentences.
+                Make it warm and trustworthy."""},
+                {"role": "user", "content": f"Write a bio for: Name: {name}, Skills: {skills}, Experience: {experience} years, Location: {location}"}
+            ]
+        )
+        return {"bio": response.choices[0].message.content}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))     
