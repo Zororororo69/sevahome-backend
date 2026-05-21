@@ -406,12 +406,17 @@ def generate_bio(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))  
 
-@app.get("/workers/{worker_id}/bookings")
-def get_worker_bookings(worker_id: int, db: Session = Depends(get_db)):
+@app.get("/workers/{user_id}/bookings")
+def get_worker_bookings(user_id: int, db: Session = Depends(get_db)):
     try:
+        profile = db.query(models.WorkerProfile).filter(
+            models.WorkerProfile.user_id == user_id
+        ).first()
+        if not profile:
+            return []
         bookings = db.query(models.Booking).filter(
-            models.Booking.worker_id == worker_id
+            models.Booking.worker_id == profile.id
         ).all()
         return bookings
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))   
+        raise HTTPException(status_code=500, detail=str(e))
