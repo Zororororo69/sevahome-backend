@@ -414,9 +414,17 @@ def get_worker_bookings(user_id: int, db: Session = Depends(get_db)):
         ).first()
         if not profile:
             return []
-        bookings = db.query(models.Booking).filter(
+        bookings = db.query(models.Booking, models.User).join(
+            models.User, models.Booking.customer_id == models.User.id
+        ).filter(
             models.Booking.worker_id == profile.id
         ).all()
-        return bookings
+        result = []
+        for booking, customer in bookings:
+            b = booking.__dict__.copy()
+            b["customer_name"] = customer.name
+            b["customer_phone"] = customer.phone
+            result.append(b)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
