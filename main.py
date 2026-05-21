@@ -97,7 +97,8 @@ def login(credentials: schemas.UserLogin, db: Session = Depends(get_db)):
         "access_token": token,
         "token_type": "bearer",
         "role": user.role,
-        "name": user.name
+        "name": user.name,
+        "user_id": user.id
     }
 
 @app.post("/worker/profile")
