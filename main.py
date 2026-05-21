@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Depends
-from groq import Groq
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from groq import Groq
 from sqlalchemy.orm import Session
 from database import engine, get_db, Base
 import models, schemas
@@ -15,6 +15,15 @@ load_dotenv()
 # --- Setup ---
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="SevaHome API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY")
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -121,12 +130,20 @@ def get_workers(
     db: Session = Depends(get_db)
 ):
     try:
-        query = db.query(models.WorkerProfile)
+        query = db.query(models.WorkerProfile, models.User).join(
+            models.User, models.WorkerProfile.user_id == models.User.id
+        )
         if location:
             query = query.filter(models.WorkerProfile.location.ilike(f"%{location}%"))
         if skill:
             query = query.filter(models.WorkerProfile.skills.ilike(f"%{skill}%"))
-        workers = query.all()
+        results = query.all()
+        workers = []
+        for profile, user in results:
+            w = profile.__dict__.copy()
+            w["name"] = user.name
+            w["email"] = user.email
+            workers.append(w)
         return workers
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -134,12 +151,16 @@ def get_workers(
 @app.get("/workers/{worker_id}")
 def get_worker(worker_id: int, db: Session = Depends(get_db)):
     try:
-        worker = db.query(models.WorkerProfile).filter(
-            models.WorkerProfile.id == worker_id
-        ).first()
-        if not worker:
+        result = db.query(models.WorkerProfile, models.User).join(
+            models.User, models.WorkerProfile.user_id == models.User.id
+        ).filter(models.WorkerProfile.id == worker_id).first()
+        if not result:
             raise HTTPException(status_code=404, detail="Worker not found!")
-        return worker
+        profile, user = result
+        w = profile.__dict__.copy()
+        w["name"] = user.name
+        w["email"] = user.email
+        return w
     except HTTPException:
         raise
     except Exception as e:
@@ -381,4 +402,14 @@ def generate_bio(
         )
         return {"bio": response.choices[0].message.content}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))     
+        raise HTTPException(status_code=500, detail=str(e))  
+
+@app.get("/workers/{worker_id}/bookings")
+def get_worker_bookings(worker_id: int, db: Session = Depends(get_db)):
+    try:
+        bookings = db.query(models.Booking).filter(
+            models.Booking.worker_id == worker_id
+        ).all()
+        return bookings
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
