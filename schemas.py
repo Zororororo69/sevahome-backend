@@ -109,3 +109,11 @@ class ReviewCreate(BaseModel):
     reviewee_id: int
     rating: float
     comment: Optional[str] = None    
+
+class WorkerProfileUpdate(BaseModel):
+    bio: str = None
+    hourly_rate: float = None
+    experience: int = None
+    location: str = None
+    skills: str = None
+    is_available: bool = None

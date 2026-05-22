@@ -145,6 +145,7 @@ def get_workers(
             w = profile.__dict__.copy()
             w["name"] = user.name
             w["email"] = user.email
+            w["phone"] = user.phone
             workers.append(w)
         return workers
     except Exception as e:
@@ -217,12 +218,23 @@ def get_booking(booking_id: int, db: Session = Depends(get_db)):
 @app.get("/customers/{customer_id}/bookings")
 def get_customer_bookings(customer_id: int, db: Session = Depends(get_db)):
     try:
-        bookings = db.query(models.Booking).filter(
+        results = db.query(models.Booking, models.WorkerProfile, models.User).join(
+            models.WorkerProfile, models.Booking.worker_id == models.WorkerProfile.id
+        ).join(
+            models.User, models.WorkerProfile.user_id == models.User.id
+        ).filter(
             models.Booking.customer_id == customer_id
         ).all()
+        bookings = []
+        for booking, profile, user in results:
+            b = booking.__dict__.copy()
+            b["worker_name"] = user.name
+            b["worker_location"] = profile.location
+            b["worker_skills"] = profile.skills
+            bookings.append(b)
         return bookings
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))    
+        raise HTTPException(status_code=500, detail=str(e))   
     
 @app.post("/services")
 def create_service(name: str, description: str, db: Session = Depends(get_db)):
@@ -426,5 +438,37 @@ def get_worker_bookings(user_id: int, db: Session = Depends(get_db)):
             b["customer_phone"] = customer.phone
             result.append(b)
         return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/worker/profile/{user_id}")
+def get_worker_profile(user_id: int, db: Session = Depends(get_db)):
+    try:
+        profile = db.query(models.WorkerProfile).filter(
+            models.WorkerProfile.user_id == user_id
+        ).first()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found!")
+        return profile
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/worker/profile/{user_id}")
+def update_worker_profile(user_id: int, profile: schemas.WorkerProfileUpdate, db: Session = Depends(get_db)):
+    try:
+        worker = db.query(models.WorkerProfile).filter(
+            models.WorkerProfile.user_id == user_id
+        ).first()
+        if not worker:
+            raise HTTPException(status_code=404, detail="Profile not found!")
+        for key, value in profile.dict(exclude_unset=True).items():
+            setattr(worker, key, value)
+        db.commit()
+        db.refresh(worker)
+        return worker
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
